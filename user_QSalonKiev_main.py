@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import constants as c
 
-from aiogram import Bot, Dispatcher, executor, types
+from aiogram import Bot, Dispatcher, executor, types, utils
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -15,7 +15,7 @@ dp = Dispatcher(bot, storage=storage)
 main_text = "Благодарим что обратились к нам 🤗\n" \
             "Наш [канал](https://t.me/QSalon_Kiev) очень эффективен 👍😊\n" \
             "Все обьявления проверяются модератором 😎\n\n" \
-            "ОЗНАКОМТЕСЬ С ВИДЕО ИНСТРУКЦИЕЙ 2 мин 💁‍♂\nhttps://bit.ly/3kd0jFY\n\n" \
+            "ОЗНАКОМТЕСЬ С ВИДЕО ИНСТРУКЦИЕЙ 2 мин 💁‍♂\nhttps://bit.ly/2DR3Auk\n\n" \
             "👉 *Выберете категорию вашего обьявления:*\n" \
             "1. Бьюти или фото услуги.\n" \
             "2. Диетологи, Спорт, Врачи, Курсы\n" \
@@ -26,9 +26,21 @@ sub_main_text = "*Выберете максимальную цену ваших 
                 "2. Модель оплачивает сумму до 249 грн.\n" \
                 "3. Модель оплачивает сумму от 250 грн."
 
-comm_text = "Возможно у вас есть дополнительные пожелания? 🤔\n" \
-            "Напишите их сюда или нажмите\n«Далее ➡»\n\n" \
-            "Связь с администратором: @katrin_model"
+comm_text = "Есть пожелание на какое время публикация? 🤔\n" \
+            "Если нет то нажмите «Далее ➡»\n\n" \
+            "Связь с администратором: @rivikate"
+
+ad_text_text = "Напишите Ваше обьявление 🤗\n\n🖐🖐🖐 *ВАЖНО!!!* 🖐🖐🖐\n" \
+               "*ЧТО ДОЛЖНО БЫТЬ В ОБЯЛЕНИИ:*\n\n" \
+               "⚘ Немного о себе (салоне/организации)\n" \
+               "⚘ Когда будет услуга?\n" \
+               "⚘ Где будет ваша услуга?\n" \
+               "⚘ Стоимость вашей услуги\n" \
+               "🖐 Ваши контакты 🖐"
+
+media_text = "👉 Загрузите медиа файлы к вашей публикации (не больше 3 фото или 1 видео)\n\n" \
+             "После загрузки всех медиафайлов нажмите «Далее ➡».\n\n" \
+             "Если кнопка «Далее ➡» не видна нажмите\n🖐 СЛЕВА ОТ МИКРОФОНА КВАДРАТИК 🖐\nи она появится 💁‍♂😊"
 
 post_cost_text = "Цена вашей публикации {}"
 requisites_text = "*Реквизиты для оплаты:*\nПриватБанк `5221 1911 0065 3194` _Панченко А. О._ \n\nПосле оплаты загрузите, пожалуйста, скрин/фото вашей оплаты."
@@ -42,11 +54,8 @@ main_button = "🌼 Создать публикацию"
 
 class Form(StatesGroup):
     pay_photo = State()
-    when = State()
-    cost = State()
-    where = State()
-    text = State()
     media = State()
+    text = State()
     comment = State()
     confirm = State()
 
@@ -57,36 +66,34 @@ async def make_post(message, data):
     first_name = str(message.from_user.first_name).replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
     username = str(message.from_user.username).replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
     comm = str(data['comm']).replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
-    await bot.send_photo(c.admin, data['pay_photo'],
+    await bot.send_photo(c.admin1, data['pay_photo'],
                          f"Оплата: [{first_name}](tg://user?id={message.from_user.id})\n"
                          f"@{username}\n\nКомментарий: {comm}", parse_mode=types.ParseMode.MARKDOWN)
-    text = f"{data['text']}\n\n🗓 Когда?\n{data['when']}\n\n💵 Стоимость?\n{data['cost']}\n\n📍 Где?\n{data['where']}"
     if data['photo']:
         if len(data['photo']) == 1:
             key.add(types.InlineKeyboardButton("Опубликовать", callback_data="post"))
-            await bot.send_photo(c.admin, data['photo'][0], caption=text, reply_markup=key)
+            await bot.send_photo(c.admin1, data['photo'][0], caption=data['text'], reply_markup=key)
         else:
             key.add(types.InlineKeyboardButton("Опубликовать", callback_data="post_group"))
-            photos = [types.InputMediaPhoto(data['photo'][0], caption=text)] \
+            photos = [types.InputMediaPhoto(data['photo'][0], caption=data['text'])] \
                 + [types.InputMediaPhoto(x) for x in data['photo'][1:]]
-            m = await bot.send_media_group(c.admin, photos)
-            await bot.send_message(c.admin, f'{text}\n\n{{"photo_group": {[x.photo[-1].file_id for x in m]}}}', reply_markup=key)
+            m = await bot.send_media_group(c.admin1, photos)
+            await bot.send_message(c.admin1, f'{data["text"]}\n\n{{"photo_group": {[x.photo[-1].file_id for x in m]}}}', reply_markup=key)
     elif data['video']:
         key.add(types.InlineKeyboardButton("Опубликовать", callback_data="post"))
-        await bot.send_video(c.admin, data['video'], caption=text, reply_markup=key)
+        await bot.send_video(c.admin1, data['video'], caption=data['text'], reply_markup=key)
 
 
 async def confirm_post(message, data):
-    text = f"{data['text']}\n\n🗓 Когда\n{data['when']}\n\n💵 Стоимость?\n{data['cost']}\n\n📍 Где?\n{data['where']}"
     if data['photo']:
         if len(data['photo']) == 1:
-            await bot.send_photo(message.chat.id, data['photo'][0], caption=text)
+            await bot.send_photo(message.chat.id, data['photo'][0], caption=data['text'])
         else:
-            photos = [types.InputMediaPhoto(data['photo'][0], caption=text)] \
+            photos = [types.InputMediaPhoto(data['photo'][0], caption=data['text'])] \
                 + [types.InputMediaPhoto(x) for x in data['photo'][1:]]
             await bot.send_media_group(message.chat.id, photos)
     elif data['video']:
-        await bot.send_video(message.chat.id, data['video'], caption=text)
+        await bot.send_video(message.chat.id, data['video'], caption=data['text'])
 
 
 async def choose_service(message, cost_text, cost):
@@ -102,13 +109,13 @@ async def choose_service(message, cost_text, cost):
 async def back_function(message, state):
     if message.text in (back_button, '/start'):
         await state.update_data({'photo': None})
-        await Form.when.set()
+        await Form.media.set()
         key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        key.add(next_button)
         key.add(back_button)
         await message.answer("Отменено, начнём ввод данных сначала...", reply_markup=key)
-        await message.answer("Когда будет ваша услуга?")
+        await message.answer(media_text)
         return True
-    return False
 
 
 def main_key():
@@ -128,6 +135,7 @@ async def main_inline_keys(message):
 
 @dp.message_handler(commands=['start'])
 async def message_handler(message: types.Message):
+    await bot.send_video(message.chat.id, c.tutorial_video_id_1)
     await main_inline_keys(message)
 
 
@@ -164,55 +172,10 @@ async def photo_handler(message: types.Message, state: FSMContext):
     await state.update_data({'pay_photo': message.photo[-1].file_id})
     await Form.next()
     await message.answer("Теперь помогите нам создать и выложить обьявление которое приведет вам клиентов 👌")
-    await message.answer("Напишите, когда будет ваша услуга?")
-
-
-@dp.message_handler(content_types=['text'], state=Form.when)
-async def cost_handler(message: types.Message, state: FSMContext):
-    if await back_function(message, state):
-        return
-
-    await state.update_data({'when': message.text})
-    await Form.next()
-    await message.answer("Напишите, какая стоимость ваших услуг включая материалы?")
-
-
-@dp.message_handler(content_types=['text'], state=Form.cost)
-async def when_handler(message: types.Message, state: FSMContext):
-    if await back_function(message, state):
-        return
-
-    await state.update_data({'cost': message.text})
-    await Form.next()
-    await message.answer("Напишите, где будет ваша услуга?")
-
-
-@dp.message_handler(content_types=['text'], state=Form.where)
-async def where_handler(message: types.Message, state: FSMContext):
-    if await back_function(message, state):
-        return
-
-    await state.update_data({'where': message.text})
-    await Form.next()
-    await message.answer("Основной текст обьявления, немного о себе и не забудьте указать ваши контакты:")
-
-
-@dp.message_handler(content_types=['text'], state=Form.text)
-async def text_handler(message: types.Message, state: FSMContext):
-    if await back_function(message, state):
-        return
-
-    if len(message.text) > 1020:
-        await message.answer("Текст слишком длинный")
-        return
-    await state.update_data({'text': message.text})
-    await Form.next()
     key = types.ReplyKeyboardMarkup(resize_keyboard=True)
     key.add(next_button)
     key.add(back_button)
-    await message.answer("Загрузите медиа файлы к вашей публикации (не больше 3 фото или 1 видео)\n\n"
-                         "После загрузки всех медиафайлов нажмите «Далее ➡».\n\n"
-                         "Если кнопка «Далее ➡» не видна нажмите слева от микрофона квадратик и она появится", reply_markup=key)
+    await message.answer(media_text, reply_markup=key)
 
 
 @dp.message_handler(content_types=types.ContentType.ANY, state=Form.media)
@@ -220,50 +183,60 @@ async def media_handler(message: types.Message, state: FSMContext):
     if await back_function(message, state):
         return
 
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(back_button)
+
+    data = await state.get_data()
     if message.text == next_button:
-        async with state.proxy() as data:
-            data['video'] = None
-            try:
-                if not data['photo']:
-                    raise KeyError
-            except KeyError:
-                await message.answer("Медиа файл обязателен!")
-                return
+        await state.update_data({'video': None})
+        if not data.get('photo'):
+            await message.answer("Медиа файл обязателен!")
+            return
         await Form.next()
-        await message.answer(comm_text)
+        await message.answer(ad_text_text, parse_mode="Markdown", reply_markup=key)
 
     elif message.photo:
-        async with state.proxy() as data:
-            data['video'] = None
-            try:
-                if data['photo'] is None:
-                    raise KeyError
-                if len(data['photo']) != 3:
-                    data['photo'].append(message.photo[-1].file_id)
-                else:
-                    data['photo'] = None
-                    await message.answer("Не больше 3-х фото 🌼")
-            except KeyError:
-                data['photo'] = [message.photo[-1].file_id]
+        await state.update_data({'video': None})
+        if data.get('photo'):
+            if len(data['photo']) != 3:
+                data['photo'].append(message.photo[-1].file_id)
+            else:
+                data['photo'] = None
+                await message.answer("Не больше 3-х фото 🌼")
+        else:
+            data['photo'] = [message.photo[-1].file_id]
+        await state.update_data({'photo': data['photo']})
 
     elif message.video:
-        async with state.proxy() as data:
-            try:
-                if data['photo'] is None:
-                    raise KeyError
-                await message.answer("Только фото или видео, вы уже добавили фото!")
-                return
-            except KeyError:
-                data['video'] = message.video.file_id
-                data['photo'] = None
+        if data.get('photo'):
+            await message.answer("Только фото или видео, вы уже добавили фото!")
+            return
+        await state.update_data({'video': message.video.file_id, 'photo': None})
         await Form.next()
-        await message.answer(comm_text)
+        await message.answer(ad_text_text, parse_mode="Markdown", reply_markup=key)
 
     else:
         if message.document:
             await message.reply("Отправьте изображение как фотографию, а не как файл")
         else:
             await message.reply("Это не фото или видео")
+
+
+@dp.message_handler(content_types=['text'], state=Form.text)
+async def text_handler(message: types.Message, state: FSMContext):
+    if await back_function(message, state):
+        return
+
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(next_button)
+    key.add(back_button)
+    if len(message.text) > 980:
+        await message.answer("Текст слишком длинный")
+        return
+    await state.update_data({'text': message.text})
+    await Form.next()
+
+    await message.answer(comm_text, reply_markup=key)
 
 
 @dp.message_handler(content_types=['text'], state=Form.comment)
@@ -283,8 +256,8 @@ async def message_handler(message: types.Message, state: FSMContext):
     key = types.ReplyKeyboardMarkup(resize_keyboard=True)
     key.add(complete_button)
     key.add(back_button)
-    await message.answer("Предварительный просмотр публикации")
-    await message.answer("ДЛЯ ПУБЛИКАЦИИ НАЖМИТЕ «✅ ЗАКОНЧИТЬ»", reply_markup=key)
+    await message.answer("Предварительный просмотр публикации\n\n"
+                         "ДЛЯ ПУБЛИКАЦИИ НАЖМИТЕ «✅ ЗАКОНЧИТЬ»", reply_markup=key)
 
 
 @dp.message_handler(content_types=['text'], state=Form.confirm)
@@ -340,7 +313,9 @@ async def callback_inline(callback_query: types.CallbackQuery):
             await choose_service(callback_query.message, "всего 140 грн 🌺", 140)
         elif text_data == "item_3":
             await choose_service(callback_query.message, "237 грн. Мы вам гарантируем до 2000 просмотров за пару дней 🥳", 237)
-        await bot.delete_message(callback_query.message.chat.id, callback_query.message.message_id)
+        try: await bot.delete_message(callback_query.message.chat.id, callback_query.message.message_id)
+        except utils.exceptions.MessageCantBeDeleted: pass
+        except utils.exceptions.MessageToDeleteNotFound: pass
 
 
 if __name__ == "__main__":
