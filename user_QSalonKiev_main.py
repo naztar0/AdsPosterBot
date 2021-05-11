@@ -6,6 +6,10 @@ from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
+from asyncio import get_event_loop, sleep
+from datetime import datetime
+import pickle
+import json
 
 bot = Bot(c.token1)
 storage = MemoryStorage()
@@ -36,11 +40,16 @@ ad_text_text = "Напишите Ваше обьявление 🤗\n\n🖐🖐�
                "⚘ Когда будет услуга?\n" \
                "⚘ Где будет ваша услуга?\n" \
                "⚘ Стоимость вашей услуги\n" \
-               "🖐 Ваши контакты 🖐"
+               "🖐 Ваши контакты (кликабельные)\n" \
+               "🖐 Ссылка на ваш телеграмм обязательна!"
 
 media_text = "👉 Загрузите медиа файлы к вашей публикации (не больше 3 фото или 1 видео)\n\n" \
              "После загрузки всех медиафайлов нажмите «Далее ➡».\n\n" \
              "Если кнопка «Далее ➡» не видна нажмите\n🖐 СЛЕВА ОТ МИКРОФОНА КВАДРАТИК 🖐\nи она появится 💁‍♂😊"
+
+low_motivation_text = "Добрый день 🤗 Вы уже 2 недели не публиковали свое обьявление на нашем канале «ищу модель» 😱😊\n\n" \
+                      "Наша аудитория постоянно растет и много новых клиентов хотят увидеть именно вашу публикацию 🤔😉\n\n" \
+                      "Попробуйте еще 😌"
 
 post_cost_text = "Цена вашей публикации {}"
 requisites_text = "*Реквизиты для оплаты:*\nПриватБанк `5221 1911 0065 3194` _Панченко А. О._ \n\nПосле оплаты загрузите, пожалуйста, скрин/фото вашей оплаты."
@@ -60,28 +69,39 @@ class Form(StatesGroup):
     confirm = State()
 
 
+async def send_message(func, **kwargs):
+    try:
+        return await func(**kwargs)
+    except utils.exceptions.BotBlocked: return
+    except utils.exceptions.UserDeactivated: return
+    except utils.exceptions.ChatNotFound: return
+    except utils.exceptions.BadRequest: return
+
+
 async def make_post(message, data):
     key = types.InlineKeyboardMarkup()
 
     first_name = str(message.from_user.first_name).replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
     username = str(message.from_user.username).replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
     comm = str(data['comm']).replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
-    await bot.send_photo(c.admin1, data['pay_photo'],
-                         f"Оплата: [{first_name}](tg://user?id={message.from_user.id})\n"
-                         f"@{username}\n\nКомментарий: {comm}", parse_mode=types.ParseMode.MARKDOWN)
-    if data['photo']:
-        if len(data['photo']) == 1:
+    for admin in c.admins1:
+        await send_message(bot.send_photo, chat_id=admin, photo=data['pay_photo'],
+                           caption=f"Оплата: [{first_name}](tg://user?id={message.from_user.id})\n"
+                           f"@{username}\n\nКомментарий: {comm}", parse_mode=types.ParseMode.MARKDOWN)
+        if data['photo']:
+            if len(data['photo']) == 1:
+                key.add(types.InlineKeyboardButton("Опубликовать", callback_data="post"))
+                await send_message(bot.send_photo, chat_id=admin, photo=data['photo'][0], caption=data['text'], reply_markup=key)
+            else:
+                key.add(types.InlineKeyboardButton("Опубликовать", callback_data="post_group"))
+                photos = [types.InputMediaPhoto(data['photo'][0], caption=data['text'])] \
+                    + [types.InputMediaPhoto(x) for x in data['photo'][1:]]
+                m = await send_message(bot.send_media_group, chat_id=admin, media=photos)
+                photo_group = json.dumps({"photo_group": [x.photo[-1].file_id for x in m]})
+                await send_message(bot.send_message, chat_id=admin, text=f"{data['text']}\n\n{photo_group}", reply_markup=key)
+        elif data['video']:
             key.add(types.InlineKeyboardButton("Опубликовать", callback_data="post"))
-            await bot.send_photo(c.admin1, data['photo'][0], caption=data['text'], reply_markup=key)
-        else:
-            key.add(types.InlineKeyboardButton("Опубликовать", callback_data="post_group"))
-            photos = [types.InputMediaPhoto(data['photo'][0], caption=data['text'])] \
-                + [types.InputMediaPhoto(x) for x in data['photo'][1:]]
-            m = await bot.send_media_group(c.admin1, photos)
-            await bot.send_message(c.admin1, f'{data["text"]}\n\n{{"photo_group": {[x.photo[-1].file_id for x in m]}}}', reply_markup=key)
-    elif data['video']:
-        key.add(types.InlineKeyboardButton("Опубликовать", callback_data="post"))
-        await bot.send_video(c.admin1, data['video'], caption=data['text'], reply_markup=key)
+            await send_message(bot.send_video, chat_id=admin, video=data['video'], caption=data['text'], reply_markup=key)
 
 
 async def confirm_post(message, data):
@@ -270,31 +290,102 @@ async def message_handler(message: types.Message, state: FSMContext):
         await state.finish()
         await message.answer(bye_text, reply_markup=main_key())
         await make_post(message, data)
+        with open(c.last_activity1, 'rt') as f:
+            data = json.load(f)
+        data[str(message.chat.id)] = int(datetime.now().timestamp())
+        with open(c.last_activity1, 'wt') as f:
+            json.dump(data, f)
+
+
+def pickle_read(file):
+    with open(file, 'rb') as f:
+        try:
+            return pickle.load(f)
+        except Exception as e:
+            return e
+
+
+async def publish_to_channel(data):
+    if len(data) == 3:
+        text, photo, video = data
+        if photo:
+            await bot.send_photo(c.group1, photo, caption=text)
+        elif video:
+            await bot.send_video(c.group1, video, caption=text)
+    else:
+        text, photo_data = data
+        photos = [types.InputMediaPhoto(photo_data[0], caption=text)] \
+            + [types.InputMediaPhoto(x) for x in photo_data[1:]]
+        await bot.send_media_group(c.group1, photos)
+
+
+async def post_postponed_loop():
+    while True:
+        if 9 <= datetime.now().hour <= 23:
+            last_publish_time: int = pickle_read(c.last_publish_time_1)
+            if isinstance(last_publish_time, Exception):
+                continue
+            now = int(datetime.timestamp(datetime.now()))
+            if now - last_publish_time > 1200:  # 1200 - 20 min
+                postponed_posts: list = pickle_read(c.postponed_posts_1)
+                if isinstance(postponed_posts, Exception):
+                    continue
+                if postponed_posts:
+                    await publish_to_channel(postponed_posts.pop(0))
+                    with open(c.last_publish_time_1, 'wb') as f:
+                        pickle.dump(now, f)
+                    with open(c.postponed_posts_1, 'wb') as f:
+                        pickle.dump(postponed_posts, f)
+        await sleep(200)  # 200 ~ 3 min
+
+
+async def postpone_post(data):
+    while True:
+        postponed_posts: list = pickle_read(c.postponed_posts_1)
+        if not isinstance(postponed_posts, Exception):
+            break
+    postponed_posts.append(data)
+    with open(c.postponed_posts_1, 'wb') as f:
+        pickle.dump(postponed_posts, f)
+
+
+async def low_motivation_loop():
+    while True:
+        if 9 <= datetime.now().hour <= 23:
+            now = int(datetime.now().timestamp())
+            timer = now - 1209600  # 2 weeks
+            with open(c.last_activity1, 'rt') as f:
+                data = json.load(f)
+            for user in data:
+                if data[user] < timer:
+                    data[user] = now
+                    await send_message(bot.send_message, chat_id=int(user), text=low_motivation_text)
+                    await sleep(.05)
+            with open(c.last_activity1, 'wt') as f:
+                json.dump(data, f)
+        await sleep(43200)  # 1/2 day
 
 
 @dp.callback_query_handler(lambda callback_query: True)
 async def callback_inline(callback_query: types.CallbackQuery):
     text_data = callback_query.data
     if text_data == "post":
+        try: await bot.edit_message_reply_markup(callback_query.message.chat.id, callback_query.message.message_id)
+        except utils.exceptions.MessageNotModified: pass
         text = callback_query.message.caption
         photo = callback_query.message.photo
         video = callback_query.message.video
-        if photo:
-            await bot.send_photo(c.group1, photo[-1].file_id, caption=text)
-        elif video:
-            await bot.send_video(c.group1, video.file_id, caption=text)
-        await callback_query.answer()
-        await callback_query.message.answer("Опубликовано!")
+        if photo: photo = photo[-1].file_id
+        if video: video = video.file_id
+        await postpone_post((text, photo, video))
     elif text_data == "post_group":
+        try: await bot.edit_message_reply_markup(callback_query.message.chat.id, callback_query.message.message_id)
+        except utils.exceptions.MessageNotModified: pass
         data = str(callback_query.message.text)
         i = data.find('{"photo_group":')
         text = data[:i]
-        photo_data = eval(data[i:])['photo_group']
-        photos = [types.InputMediaPhoto(photo_data[0], caption=text)] \
-            + [types.InputMediaPhoto(x) for x in photo_data[1:]]
-        await bot.send_media_group(c.group1, photos)
-        await callback_query.answer()
-        await callback_query.message.answer("Опубликовано!")
+        photo_data = json.loads(data[i:])['photo_group']
+        await postpone_post((text, photo_data))
     else:
         if text_data == "item_1":
             key = types.InlineKeyboardMarkup()
@@ -304,11 +395,11 @@ async def callback_inline(callback_query: types.CallbackQuery):
             key.add(but_1, but_2, but_3)
             await callback_query.message.answer(sub_main_text, parse_mode=types.ParseMode.MARKDOWN, reply_markup=key)
         elif text_data == "sub_item_1":
-            await choose_service(callback_query.message, "символические 20 грн 💁‍♂", 20)
+            await choose_service(callback_query.message, "символические 28 грн 💁‍♂", 28)
         elif text_data == "sub_item_2":
-            await choose_service(callback_query.message, "всего 38 грн 🌺", 38)
+            await choose_service(callback_query.message, "всего 48 грн 🌺", 48)
         elif text_data == "sub_item_3":
-            await choose_service(callback_query.message, "всего 76 грн 🌺", 76)
+            await choose_service(callback_query.message, "всего 95 грн 🌺", 95)
         elif text_data == "item_2":
             await choose_service(callback_query.message, "всего 140 грн 🌺", 140)
         elif text_data == "item_3":
@@ -319,4 +410,7 @@ async def callback_inline(callback_query: types.CallbackQuery):
 
 
 if __name__ == "__main__":
+    loop = get_event_loop()
+    loop.create_task(post_postponed_loop())
+    loop.create_task(low_motivation_loop())
     executor.start_polling(dp, skip_updates=True)
