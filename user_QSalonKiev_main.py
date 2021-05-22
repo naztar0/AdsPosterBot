@@ -51,6 +51,9 @@ low_motivation_text = "Добрый день 🤗 Вы уже 2 недели н�
                       "Наша аудитория постоянно растет и много новых клиентов хотят увидеть именно вашу публикацию 🤔😉\n\n" \
                       "Попробуйте еще 😌"
 
+special_offer_text = "Здесь вы можете написать свое «СПЕЦИАЛЬНОЕ ПРЕДЛОЖЕНИЕ» чтобы привлечь больше клиентов. " \
+                     "Под вашей публикацией будет отдельная кнопка💐 Функция бесплатная👌\nЧтобы пропустить, нажмите «Далее ➡»"
+
 post_cost_text = "Цена вашей публикации {}"
 requisites_text = "*Реквизиты для оплаты:*\nПриватБанк `5221 1911 0065 3194` _Панченко А. О._ \n\nПосле оплаты загрузите, пожалуйста, скрин/фото вашей оплаты."
 pay_url_button = "https://www.privat24.ua/rd/transfer_to_card/?hash=rd%2Ftransfer_to_card%2F%7B%22from%22%3A%22%22%2C%22to%22%3A%22{card}%22%2C%22amt%22%3A%22{cost}%22%2C%22ccy%22%3A%22UAH%22%7D"
@@ -65,6 +68,7 @@ class Form(StatesGroup):
     pay_photo = State()
     media = State()
     text = State()
+    special_offer = State()
     comment = State()
     confirm = State()
 
@@ -78,9 +82,20 @@ async def send_message(func, **kwargs):
     except utils.exceptions.BadRequest: return
 
 
-async def make_post(message, data):
-    key = types.InlineKeyboardMarkup()
+def save_special_offer(so_text) -> int:
+    with open(c.special_offers1, 'r') as f:
+        so_list: list = json.load(f)
+    if not so_text:
+        return 0
+    so_list.append(so_text)
+    with open(c.special_offers1, 'w') as f:
+        json.dump(so_list, f)
+    return len(so_list) - 1
 
+
+async def make_post(message, data):
+    so_id = save_special_offer(data.get('special'))
+    key = types.InlineKeyboardMarkup()
     first_name = str(message.from_user.first_name).replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
     username = str(message.from_user.username).replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
     comm = str(data['comm']).replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
@@ -90,17 +105,19 @@ async def make_post(message, data):
                            f"@{username}\n\nКомментарий: {comm}", parse_mode=types.ParseMode.MARKDOWN)
         if data['photo']:
             if len(data['photo']) == 1:
-                key.add(types.InlineKeyboardButton("Опубликовать", callback_data="post"))
+                key.add(types.InlineKeyboardButton("Опубликовать", callback_data=f'post{so_id}'))
                 await send_message(bot.send_photo, chat_id=admin, photo=data['photo'][0], caption=data['text'], reply_markup=key)
             else:
                 key.add(types.InlineKeyboardButton("Опубликовать", callback_data="post_group"))
                 photos = [types.InputMediaPhoto(data['photo'][0], caption=data['text'])] \
                     + [types.InputMediaPhoto(x) for x in data['photo'][1:]]
                 m = await send_message(bot.send_media_group, chat_id=admin, media=photos)
+                if not m:
+                    continue
                 photo_group = json.dumps({"photo_group": [x.photo[-1].file_id for x in m]})
                 await send_message(bot.send_message, chat_id=admin, text=f"{data['text']}\n\n{photo_group}", reply_markup=key)
         elif data['video']:
-            key.add(types.InlineKeyboardButton("Опубликовать", callback_data="post"))
+            key.add(types.InlineKeyboardButton("Опубликовать", callback_data=f'post{so_id}'))
             await send_message(bot.send_video, chat_id=admin, video=data['video'], caption=data['text'], reply_markup=key)
 
 
@@ -254,9 +271,40 @@ async def text_handler(message: types.Message, state: FSMContext):
         await message.answer("Текст слишком длинный")
         return
     await state.update_data({'text': message.text})
-    await Form.next()
+    data = await state.get_data()
+    so = False
+    if data.get('photo'):
+        if len(data['photo']) == 1:
+            so = True
+    if so:
+        await Form.next()
+        await message.answer(special_offer_text, reply_markup=key)
+    else:
+        await Form.comment.set()
+        await message.answer(comm_text, reply_markup=key)
 
-    await message.answer(comm_text, reply_markup=key)
+
+@dp.message_handler(content_types=['text'], state=Form.special_offer)
+async def text_handler(message: types.Message, state: FSMContext):
+    if await back_function(message, state):
+        return
+
+    if message.text == next_button:
+        await message.answer("Специальное предложение пропущено")
+    else:
+        if len(message.text) > 190:
+            await message.answer("Текст слишком длинный")
+            return
+        await state.update_data({'special': message.text})
+    await state.update_data({'comm': "-"})
+    data = await state.get_data()
+    await confirm_post(message, data)
+    await Form.confirm.set()
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(complete_button)
+    key.add(back_button)
+    await message.answer("Предварительный просмотр публикации\n\n"
+                         "ДЛЯ ПУБЛИКАЦИИ НАЖМИТЕ «✅ ЗАКОНЧИТЬ»", reply_markup=key)
 
 
 @dp.message_handler(content_types=['text'], state=Form.comment)
@@ -306,12 +354,16 @@ def pickle_read(file):
 
 
 async def publish_to_channel(data):
-    if len(data) == 3:
-        text, photo, video = data
+    if len(data) == 4:
+        text, photo, video, so_id = data
+        key = None
+        if so_id != 0:
+            key = types.InlineKeyboardMarkup()
+            key.add(types.InlineKeyboardButton("Специальное предложение", callback_data=f'so{so_id}'))
         if photo:
-            await bot.send_photo(c.group1, photo, caption=text)
+            await bot.send_photo(c.group1, photo, caption=text, reply_markup=key)
         elif video:
-            await bot.send_video(c.group1, video, caption=text)
+            await bot.send_video(c.group1, video, caption=text, reply_markup=key)
     else:
         text, photo_data = data
         photos = [types.InputMediaPhoto(photo_data[0], caption=text)] \
@@ -369,23 +421,36 @@ async def low_motivation_loop():
 @dp.callback_query_handler(lambda callback_query: True)
 async def callback_inline(callback_query: types.CallbackQuery):
     text_data = callback_query.data
-    if text_data == "post":
+    if text_data == "post_group":
         try: await bot.edit_message_reply_markup(callback_query.message.chat.id, callback_query.message.message_id)
         except utils.exceptions.MessageNotModified: pass
+        data: str = callback_query.message.text
+        i = data.find('{"photo_group":')
+        text = data[:i]
+        photo_data = json.loads(data[i:])['photo_group']
+        await postpone_post((text, photo_data))
+    elif text_data[:4] == "post":
+        try: await bot.edit_message_reply_markup(callback_query.message.chat.id, callback_query.message.message_id)
+        except utils.exceptions.MessageNotModified: pass
+        special_offer_id = int(text_data[4:])
         text = callback_query.message.caption
         photo = callback_query.message.photo
         video = callback_query.message.video
         if photo: photo = photo[-1].file_id
         if video: video = video.file_id
-        await postpone_post((text, photo, video))
-    elif text_data == "post_group":
-        try: await bot.edit_message_reply_markup(callback_query.message.chat.id, callback_query.message.message_id)
-        except utils.exceptions.MessageNotModified: pass
-        data = str(callback_query.message.text)
-        i = data.find('{"photo_group":')
-        text = data[:i]
-        photo_data = json.loads(data[i:])['photo_group']
-        await postpone_post((text, photo_data))
+        await postpone_post((text, photo, video, special_offer_id))
+    elif text_data[:2] == "so":
+        special_offer_id = int(text_data[2:])
+        member = await bot.get_chat_member(c.group1, callback_query.from_user.id)
+        if member.status == "left":
+            await callback_query.answer("Подпишитесь на канал чтобы увидеть специальное предложение", show_alert=True)
+            return
+        with open(c.special_offers1, 'r') as f:
+            data: list = json.load(f)
+        if special_offer_id < len(data):
+            await callback_query.answer(data[special_offer_id], show_alert=True)
+        else:
+            await callback_query.answer("Не найдено")
     else:
         if text_data == "item_1":
             key = types.InlineKeyboardMarkup()
